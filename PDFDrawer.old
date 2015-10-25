@@ -1,0 +1,127 @@
+﻿package com.kiosks {
+	
+	import flash.display.Sprite;
+	import flash.events.MouseEvent;
+	import com.kiosks.Tracer;
+	import flash.events.Event;
+	
+	import com.greensock.TweenLite;
+	
+	import com.kiosks.PDF;
+	import com.kiosks.PDFPage
+	
+	public class PDFDrawer extends Sprite {
+		
+		public var thumbs = new Sprite();
+		public var scrolled:Boolean = false;
+		private var thumbDrag = new Sprite();
+		private var offset = new Number;
+		private var padding = 100;
+		private var pageWidth;
+		private var pageHeight;
+		private var pdf;
+		private var leftPage, rightPage;
+		private var oldY;
+		
+		public function PDFDrawer(folder:String, fileArray:Array, pdf:PDF) {
+			
+			setupConstants();
+			this.pdf = pdf;
+			
+			Tracer("creating PDF drawer");
+			addChild(thumbDrag);
+			thumbDrag.addChild(thumbs);
+			thumbs.scaleX = thumbs.scaleY = .1;
+			thumbs.x = thumbs.y = 20;
+			thumbDrag.mask = thumbsMask;
+			addEventListener(MouseEvent.MOUSE_DOWN, startDragging);
+			
+			Tracer("Loading pdf thumbs:");
+			
+			for(var i:uint = 0; i < fileArray.length; i++) {
+					
+				Tracer("--> adding thumbnail: " + folder + "/" + fileArray[i].name);
+				var thumb = new PDFPage(folder + "/" + fileArray[i].name);
+				thumb.pageID = i;
+				thumb.x = (i % 2) * pageWidth; 
+				thumb.y = (Math.floor(i / 2) * pageHeight) + (padding * Math.floor(i / 2));
+				thumb.alpha = .6;
+				thumb.addEventListener(MouseEvent.CLICK, gotoPage);
+				thumbs.addChild(thumb);
+			}
+			
+			reset();
+		}
+		
+		private function setupConstants():void {
+			
+			pageWidth =  new PDFPage(null).getPageWidth();
+			pageHeight = new PDFPage(null).getPageHeight();
+		}
+		
+		private function startDragging(e:MouseEvent):void {
+			
+			scrolled = false;
+			offset = thumbDrag.mouseY;
+			addEventListener(MouseEvent.MOUSE_MOVE, drag);
+			addEventListener(MouseEvent.MOUSE_UP, stopDragging);
+		}
+		
+		private function drag(e:MouseEvent):void {
+			
+			thumbDrag.y = mouseY - offset;
+			scrolled = true;
+			oldY = thumbDrag.y;
+		}
+		
+		private function stopDragging(e:MouseEvent):void {
+			
+			//Tracer("oldY: " + oldY + ", newY: " + thumbDrag.y);
+			removeEventListener(MouseEvent.MOUSE_MOVE, drag);
+			if(thumbDrag.y > 0) TweenLite.to(thumbDrag, .5, { y:0 });
+			if(thumbDrag.y < thumbsMask.height - thumbDrag.height) TweenLite.to(thumbDrag, .5, { y:thumbsMask.height - thumbDrag.height });
+		}
+		
+		private function gotoPage(e:MouseEvent):void {
+			
+			if(!scrolled) {
+				
+				var pageID = e.target.pageID % 2 ? e.target.pageID - 1 : e.target.pageID;
+				pdf.gotoPage(pageID);
+
+				highlightThumb(pageID);
+			}
+		}
+
+		public function highlightThumb(pageID:uint) {
+					
+			Tracer("highlight thumb: " + pageID + "," + pdf.totalPages);
+			TweenLite.to(leftPage, .5, { alpha:.5 });
+			TweenLite.to(rightPage, .5, { alpha:.5 });
+			if(pageID < pdf.totalPages) {
+				
+				leftPage = thumbs.getChildAt(pageID);
+				TweenLite.to(leftPage, .5, { alpha:1 });
+			}
+			if(pageID + 1 < pdf.totalPages) {
+				
+				rightPage = thumbs.getChildAt(pageID+1);
+				TweenLite.to(rightPage, .5, { alpha:1 });
+			}
+			TweenLite.to(thumbDrag, .5, { y:-thumbs.getChildAt(pageID).y * thumbs.scaleY });
+		}
+
+		public function reset() {
+			
+			thumbDrag.y = 0;
+			
+			if(leftPage) leftPage.alpha = .5;
+			if(rightPage) rightPage.alpha = .5;
+			leftPage = thumbs.getChildAt(0);
+			rightPage = thumbs.getChildAt(1);
+			TweenLite.to(leftPage, .5, { alpha:1 });
+			TweenLite.to(rightPage, .5, { alpha:1 });		
+		}
+	}
+	
+}

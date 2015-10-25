@@ -1,0 +1,105 @@
+﻿package com.kiosks {
+	
+	import flash.display.MovieClip;
+	import fl.video.FLVPlayback;
+	import flash.events.MouseEvent;
+	import fl.video.VideoEvent;
+	import fl.video.MetadataEvent;
+	import flash.display.LoaderInfo;
+	import flash.events.Event;
+	
+		import flash.utils.ByteArray;
+		import flash.display.LoaderInfo;
+		import flash.net.URLLoader;
+		import flash.net.URLLoaderDataFormat;
+		import flash.net.URLRequest;
+		import flash.events.IOErrorEvent;
+	
+	public class VideoThumbnail extends MovieClip {
+
+		public var videoSource;
+		public var videoTitle;
+		public var duration;
+
+		public function VideoThumbnail(path:String, filename:String) {
+			
+			mouseChildren = false;
+			videoTitle = filename.slice(0,filename.length-4);
+			
+			switch(videoTitle) {
+				
+				case "kiosks Vikrell":
+					description.text = "Bath and kitchen products made of solid Vikrell feature quick installation, wipe clean with ease and stand up to daily life. And they do it with fresh style that fits your life.";
+					break;
+				case "Accord Seated Shower Installation":
+					description.text = "View step-by-step animated installation instructions for the Accord seated shower.";
+					break;
+				case "Ensemble Shower Installation":
+					description.text = "View step-by-step animated installation instructions for the kiosks Ensemble, Advantage, and Intrigue showers.";
+					break;
+				case "Performa Bath and Shower Install":
+					description.text = "Watch step-by-step animated instructions and learn how to install the Preforma or AllPro bath/shower.";
+					break;
+				case "Accord Tile Bath and Shower":
+					description.text = "Highlights of the Accord features, including durability and quick and easy installation.";
+					break;
+				case "Accord Seated Shower":
+					description.text = "TV Host Jodi Marks discusses the Accord seated shower and its easy, caulk-free installation, built-in storage and convenient removable seat.";
+					break;
+				case "Finesse QID Bath and Shower Door Install":
+					description.text = "Step-by-step instructions for installing a Finesse bath/shower door.";
+					break;
+				case "CleanCoat Glass Treatment":
+					description.text = "Discover how CleanCoat Glass Treatment helps protect against unsightly residue and makes glass easier to clean in this video starring Master Plumber Ed Del Grande.";
+					break;
+				case "Quick install Shower Doors":
+					description.text = "Ever wish you had a shower door, but you didn’t want to hire an installer? If you’ve been nervous to attempt installation yourself, watch this video and get the information – and confidence – you need.";
+					break;
+				default :
+					description.text = "please add description to video's metadata.";
+					break;
+			}
+
+			title.text = videoTitle;
+			videoSource = path + "/" + filename;
+			video.source = videoSource;
+			video.seek(4); // seek 5 seconds into video for a better thumbnail image.
+			video.getVideoPlayer(video.activeVideoPlayerIndex).smoothing = true;
+			video.addEventListener(MetadataEvent.METADATA_RECEIVED, getMetadata);
+			
+			var metaDataLoader = new URLLoader();
+			metaDataLoader.dataFormat = URLLoaderDataFormat.BINARY;
+			metaDataLoader.addEventListener(Event.COMPLETE, metaDataLoaded);
+			metaDataLoader.addEventListener(IOErrorEvent.IO_ERROR, metaDataError);
+			
+			metaDataLoader.load(new URLRequest(path + "/" + filename));
+
+		}
+		
+		private function getMetadata(e:MetadataEvent):void {
+			
+			duration = e.info.duration;
+		}
+		
+		
+		private function metaDataLoaded(e:Event):void {
+			
+			description.text = getDescription(e.target.data.toString().substr(500,1500));
+		}
+		
+		private function metaDataError(e:IOErrorEvent):void {
+			
+			Tracer("IO Error Looking for video metadata");
+		}
+		
+		private function getDescription(raw:String):String {
+			
+			var str = raw.indexOf("xmpDM:tapeName");
+			var end = raw.indexOf("\"", str+20);
+			var metaData = raw.substring(str+16, end);
+			return metaData;
+		}
+		
+
+	}
+}

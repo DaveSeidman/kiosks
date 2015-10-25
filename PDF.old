@@ -1,0 +1,375 @@
+﻿package com.kiosks {
+	
+	import flash.events.TransformGestureEvent;
+	import flash.ui.Multitouch;
+	import flash.ui.MultitouchInputMode;
+	import flash.display.MovieClip;
+	import flash.events.Event;
+	
+	import flash.display.MovieClip;
+	import flash.display.Sprite;
+
+	import flash.display.Loader;
+	import flash.events.Event;
+	import flash.events.MouseEvent;
+	import flash.events.IOErrorEvent;
+	import flash.filesystem.File;
+	import flash.net.URLRequest;
+	import flash.utils.setTimeout;
+	import flash.errors.IOError;
+	import flash.filters.BitmapFilter;
+	import flash.geom.Point;
+	
+	import com.greensock.TweenLite;
+	import com.greensock.plugins.TweenPlugin; 
+	import com.greensock.plugins.AutoAlphaPlugin; 
+	import com.greensock.plugins.DropShadowFilterPlugin; 
+	
+	import com.kiosks.Tracer;		
+	import com.kiosks.PDFPage;	
+	
+	
+	public class PDF extends Sprite {
+		
+		private var fileArray = new Array();
+		
+		private var pageWidth;
+		private var pageHeight;		
+		private var pageArray = new Array();
+		
+		public var totalPages = 0;
+		public var currentPageIndex = 0;
+		private var oldPageIndex = 0;
+		private var dragPageIndex = 0;
+		private var revealPageIndex = 0;
+
+		private var dragPageHolder;
+		private var dragging = false;
+		private var turning = false;
+		
+		private var peelMask; // used to clip page peel
+		private var revealMask; // used to reveal new page
+
+		private var angleFromBottom, angleFromTop;
+		private var mouse:Point, 
+					br0:Point, br1:Point, br2:Point, br3:Point, brTan,
+					bl0:Point, bl1:Point, bl2:Point, bl3:Point, blTan, 
+					tr0:Point, tr1:Point, tr2:Point, tr3:Point, trTan,
+					tl0:Point, tl1:Point, tl2:Point, tl3:Point, tlTan,
+					bSpine:Point, tSpine:Point;
+							
+		private var pageAngle, clipAngle, diagonalDistance;
+
+		private var pdfControls;
+
+		public function PDF(folder:String, fileArray:Array, pdfControls:PDFControls) {
+			
+			TweenPlugin.activate([AutoAlphaPlugin,DropShadowFilterPlugin]);
+			
+			this.pdfControls = pdfControls;
+			
+			totalPages = fileArray.length;
+			
+			setupConstants();
+			
+			dragPageHolder = new Sprite();
+			addChild(dragPageHolder);
+			
+			Tracer("Loading pages from " + folder);
+			for(var i:uint = 0; i < fileArray.length; i++) {
+				//Tracer("--> adding page: " + folder + "/" + fileArray[i].name);
+				var page = new PDFPage(folder + "/" + fileArray[i].name);
+				page.pageID = i;
+				page.visible = false;
+				if(fileArray.length > 2) {
+					page.addEventListener(MouseEvent.MOUSE_DOWN, pageClicked); // enable page turning if there's more than 2 page
+				}
+				addChild(page);
+				pageArray.push(page);
+			}
+			Tracer("Found " + i + " pages");
+		
+			reset();
+		}
+		
+		public function nextPage():void {
+			Tracer(currentPageIndex + "," + totalPages);
+			if(!dragging && !turning && currentPageIndex <= totalPages - 4) {
+				if(!(currentPageIndex % 2)) currentPageIndex++;
+				dragPageIndex = currentPageIndex + 1;
+				revealPageIndex = currentPageIndex + 2;
+				if(dragPageIndex < pageArray.length) {
+					turning = true;
+					startDragging(PDFPage(pageArray[currentPageIndex]));
+					finishTurn();
+				}
+			}
+		}
+		
+		public function prevPage():void {
+			
+			if(!dragging && !turning && currentPageIndex > 1) {
+				if(currentPageIndex % 2) currentPageIndex--;
+				dragPageIndex = currentPageIndex - 1;
+				revealPageIndex = currentPageIndex - 2;	
+				if(dragPageIndex >= 0) {
+					turning = true;
+					startDragging(PDFPage(pageArray[currentPageIndex]));
+					finishTurn();
+				}
+			}
+		}
+		
+		public function gotoPage(pageID:uint):void {
+			
+			if(!dragging && !turning && pageID != currentPageIndex) {
+				
+				Tracer("jumping to page: " + pageID);				
+				
+				currentPageIndex = pageID;
+				dragPageIndex = currentPageIndex;
+				revealPageIndex = currentPageIndex + 1;
+				currentPageIndex += currentPageIndex > oldPageIndex ? -1 : 1;
+				//if(currentPageIndex < oldPageIndex)
+				if(dragPageIndex >= 0 && dragPageIndex < pageArray.length) {
+					turning = true;
+					startDragging(PDFPage(pageArray[currentPageIndex]));
+					finishTurn();
+				}
+				
+				
+			}
+		}
+		
+		private function setupConstants():void {
+			
+			Tracer("setting up PDF constants, should run only once");
+			pageWidth = new PDFPage(null).getPageWidth();
+			pageHeight = new PDFPage(null).getPageHeight();
+			
+			//Tracer("page width and height: " + pageWidth + ", " + pageHeight);
+			Tracer("pageWidth = " + pageWidth);
+			//removeEventListener("pageLoaded", setupConstants);
+			
+			addEventListener(MouseEvent.MOUSE_UP, stopDraggingPage);
+			addEventListener(Event.MOUSE_LEAVE, stopDraggingPage);
+
+			mouse = new Point;
+			br0 = new Point; br1 = new Point; br2 = new Point; br3 = new Point;
+			tr0 = new Point; tr1 = new Point; tr2 = new Point; tr3 = new Point;
+			bl0 = new Point; bl1 = new Point; bl2 = new Point; bl3 = new Point;
+			tl0 = new Point; tl1 = new Point; tl2 = new Point; tl3 = new Point; 
+			bSpine = new Point; tSpine = new Point;
+			
+			br0.x = (pageWidth*2);
+			bl0.x = 0;
+			
+			mouse.y = pageHeight / this.scaleY; // the pageHeight;
+			br0.y = pageHeight / this.scaleY;
+			bl0.y = pageHeight / this.scaleY;
+			
+			bSpine.x = tSpine.x = (pageWidth*2) / 2;
+			bSpine.y = pageHeight / this.scaleY;
+			tSpine.y = 0;
+
+			diagonalDistance = Point.distance(tSpine, br0);
+
+			peelMask = new PageClip; // replace these with sprites?
+			revealMask = new PageClip;			
+		}
+		
+		private function pageClicked(e:MouseEvent):void {
+			
+			if(!dragging && !turning && this.scaleX <= .5) {
+			
+				dragPageIndex = e.target.pageID + (e.target.pageID % 2 ? 1 : -1);
+				// if the pdf isn't zoomed and not already turning and there are more pages to drag:
+				if(dragPageIndex >= 0 && dragPageIndex < pageArray.length) { // if more pages in front or back, allow dragging
+					dragging = true;
+					revealPageIndex = dragPageIndex + (e.target.pageID % 2 ? 1 : - 1); // maybe we should set this in mouse down event so we can also set it in next prev button events
+					startDragging(PDFPage(e.target));
+				}
+			}
+		}
+		
+		private function startDragging(page:PDFPage):void {
+			
+			Tracer("currentPage: " + currentPageIndex + ", dragPage: " + dragPageIndex + ", revealPage: " + revealPageIndex);
+			addChild(peelMask);
+
+			mouse.x = (page.pageID % 2) ? (pageWidth*2) : 0; // start peel from left or right bottom corner
+			
+			//pageArray[dragPageIndex].alpha = 0;
+			//TweenLite.to(pageArray[dragPageIndex], .1, { alpha:1 });
+			setTimeout(function() {pageArray[dragPageIndex].visible = true; }, 10);
+			dragPageHolder.addChild(pageArray[dragPageIndex]);
+			
+			TweenLite.to(pageArray[dragPageIndex], .25, {dropShadowFilter:{blurX:15, blurY:15, angle:90, distance:15, alpha:0.25}}); 
+			
+			pageArray[dragPageIndex].y = -pageArray[dragPageIndex].height;
+			if(pageArray[dragPageIndex].pageID % 2) { 
+				
+				pageArray[dragPageIndex].x = pageWidth; 
+				pageArray[dragPageIndex].y = pageHeight; 
+				
+				pageArray[dragPageIndex].rotation = 180; 
+			}
+			pageArray[dragPageIndex].mask = peelMask;
+			
+			addEventListener(Event.ENTER_FRAME, draggingPage);
+			
+			if(revealPageIndex >= 0 && revealPageIndex < pageArray.length) { // if there's a page underneath, bring it to the front and display it.
+				
+				//revealPage = pageArray[revealPageIndex];
+				pageArray[revealPageIndex].mask = revealMask;
+				setTimeout(function() { pageArray[revealPageIndex].visible = true; }, 10);
+				
+				setChildIndex(pageArray[revealPageIndex], numChildren-1);
+				addChild(revealMask);
+			}
+			setChildIndex(dragPageHolder, numChildren-1);
+		}
+		
+		private function draggingPage(e:Event):void {
+
+			if(dragging) {
+				
+				// ease mouse point towards actual mouse location
+				mouse.x += (mouseX - mouse.x)/4;
+				mouse.y += (mouseY - mouse.y)/4;
+				
+				// prevent page from tearing at bottom
+				angleFromBottom = Math.atan2((bSpine.y - mouse.y), (bSpine.x - mouse.x));
+				if(Point.distance(mouse, bSpine) > (pageWidth*2)/2) {
+					
+					mouse.x = bSpine.x - Math.cos(angleFromBottom) * ((pageWidth*2)/2);
+					mouse.y = bSpine.y - Math.sin(angleFromBottom) * ((pageWidth*2)/2);
+				}
+				
+				// prevent page from tearing at top
+				angleFromTop = Math.atan2((tSpine.y - mouse.y), (tSpine.x - mouse.x));
+				if(Point.distance(mouse, tSpine) > diagonalDistance) {
+					mouse.x = tSpine.x - Math.cos(angleFromTop) * diagonalDistance;
+					mouse.y = tSpine.y - Math.sin(angleFromTop) * diagonalDistance;
+				}
+				
+			}
+			drawPeel();
+		}
+		
+		private function drawPeel() {
+						
+			// point 1 is halfway between the mouse and the book's corner
+			br1.x = mouse.x + (br0.x - mouse.x)/2;	
+			br1.y = mouse.y + (br0.y - mouse.y)/2;
+			bl1.x = mouse.x + (bl0.x - mouse.x)/2;
+			bl1.y = mouse.y + (bl0.y - mouse.y)/2;
+			
+			brTan = br1.x - Math.tan(Math.atan2(br0.y - br1.y, br0.x - br1.x)) * (br0.y - br1.y);
+			blTan = bl1.x - Math.tan(Math.atan2(bl0.y - bl1.y, bl0.x - bl1.x)) * (bl0.y - bl1.y);
+			
+			if(brTan < 0) brTan = 0;
+			if(blTan < 0) blTan = 0;
+			
+			br2.x = brTan;
+			br2.y = br0.y;
+			bl2.x = blTan;
+			bl2.y = bl0.y;
+			
+			br3.x = br1.x;
+			br3.y = br2.y;
+			bl3.x = bl1.x;
+			bl3.y = bl2.y;
+			
+			pageAngle = (pageArray[dragPageIndex].pageID % 2) ? Math.atan2(bl2.y - mouse.y, bl2.x - mouse.x) : Math.atan2(br2.y - mouse.y, br2.x - mouse.x);
+			clipAngle = (pageArray[dragPageIndex].pageID % 2) ? Math.atan2(bl2.y - bl1.y, bl2.x - bl1.x) : 
+																Math.atan2(br2.y - br1.y, br2.x - br1.x);
+			
+			if (clipAngle < 0) clipAngle += Math.PI;
+			clipAngle *= 180/Math.PI;
+			
+			clipAngle += 90;
+			pageAngle *= 180/Math.PI;
+
+			// set corner of peel page to mouse location
+			dragPageHolder.x = mouse.x;	
+			dragPageHolder.y = mouse.y;
+			dragPageHolder.rotation = pageAngle;
+			
+			// position and roate masks
+			peelMask.x = (pageArray[dragPageIndex].pageID % 2) ? bl1.x : br1.x;
+			peelMask.y = (pageArray[dragPageIndex].pageID % 2) ? bl1.y : br1.y;
+			revealMask.x = (pageArray[dragPageIndex].pageID % 2) ? bl1.x : br1.x;
+			revealMask.y = (pageArray[dragPageIndex].pageID % 2) ? bl1.y : br1.y;
+			peelMask.rotation = (pageArray[dragPageIndex].pageID % 2) ? clipAngle - 180 : clipAngle;
+			revealMask.rotation = (pageArray[dragPageIndex].pageID % 2) ? clipAngle : clipAngle + 180;
+		}
+
+		private function stopDraggingPage(e:MouseEvent = null):void {
+			
+			if(dragging) {
+				removeEventListener(Event.ENTER_FRAME, draggingPage);
+				finishTurn();
+			}
+		}
+
+		private function finishTurn():void {
+			
+			TweenLite.to(mouse, .5, { x:(pageArray[dragPageIndex].pageID % 2) ? pageWidth * 2 : 0, 
+						 			  y:br0.y - 1, 
+									  onUpdate:drawPeel, 
+									  onComplete:updatePages });
+									  
+			TweenLite.to(pageArray[dragPageIndex], .25, { dropShadowFilter:{blurX:15, blurY:15, angle:90, distance:0, alpha:0}, delay:.25 }); 
+		}
+		
+		private function updatePages() {
+			
+			pageArray[dragPageIndex].mask = null;
+			pageArray[dragPageIndex].x = (pageArray[dragPageIndex].pageID % 2) * pageWidth;
+			pageArray[dragPageIndex].y = 0;
+			pageArray[dragPageIndex].rotation = 0;
+			pageArray[dragPageIndex].filters = [];
+			addChild(pageArray[dragPageIndex]);
+			addChild(pageArray[revealPageIndex]);
+			removeChild(peelMask);
+			
+			pageArray[revealPageIndex].mask = null;
+			try { removeChild(revealMask); }
+			catch(error:*) { Tracer("no revealPage to remove"); }
+
+			// hide two pages that just got covered
+			PDFPage(pageArray[oldPageIndex]).visible = false;
+			PDFPage(pageArray[oldPageIndex+1]).visible = false;
+
+			dragPageHolder.x = 0; 
+			dragPageHolder.y = 0;
+			currentPageIndex = pageArray[revealPageIndex].pageID;
+			if(currentPageIndex % 2) currentPageIndex--;
+			oldPageIndex = currentPageIndex;
+			Tracer("currentPageIndex: " + currentPageIndex);			
+			pdfControls.currentOfTotal.text = currentPageIndex ? currentPageIndex - 1 + " of " + (pageArray.length - 3) : "Cover";
+			
+			dragging = false;
+			turning = false;
+			
+			dispatchEvent(new Event("updatePages", true));
+		}
+		
+		
+		public function reset():void {
+			
+			Tracer("resetting PDF");
+			for(var i:uint = 0; i < pageArray.length; i++) {
+				var page = PDFPage(pageArray[i]);
+				page.visible = i < 2;
+				page.x = (i % 2) * pageWidth;
+			}
+			pdfControls.currentOfTotal.text = "Cover";
+		}
+		
+		private function loadError(e:IOErrorEvent):void {
+			Tracer("image load error");
+		}
+	}
+}
